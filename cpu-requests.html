@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>K8s Node: Requests &amp; Actual Usage</title>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#1e293b; --panel2:#273449;
+    --text:#e2e8f0; --muted:#94a3b8; --line:#334155;
+    --node-bg:#0b1220; --node-border:#475569;
+    --run:#2563eb; --throttle:#dc2626;
+    --a:#8b5cf6; --b:#f59e0b; --c:#10b981;
+  }
+  *{box-sizing:border-box}
+  body{margin:0; padding:32px 28px 64px;
+    background:radial-gradient(1200px 600px at 20% -10%, #16223b, var(--bg));
+    color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;}
+  h1{font-size:22px; margin:0 0 4px}
+  .sub{color:var(--muted); margin:0 0 24px; max-width:780px; line-height:1.5; font-size:14px}
+  .wrap{max-width:1100px}
+  .badge{display:inline-block; background:var(--panel2); color:var(--muted); font-size:11px;
+    padding:2px 9px; border-radius:999px; margin-left:8px; vertical-align:middle; letter-spacing:.04em}
+
+  /* stats */
+  .stats{display:flex; flex-wrap:wrap; gap:12px; margin-bottom:26px}
+  .stat{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 16px; min-width:150px; flex:1}
+  .stat .label{font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted)}
+  .stat .big{font-size:24px; font-weight:650; margin-top:4px; font-variant-numeric:tabular-nums}
+  .stat .pct{font-size:13px; color:var(--muted); margin-left:6px; font-weight:500}
+  .pill{display:inline-block; padding:4px 12px; border-radius:999px; font-size:14px; font-weight:650; margin-top:4px}
+  .pill.ok{background:rgba(16,185,129,.15); color:#34d399}
+  .pill.bad{background:rgba(220,38,38,.18); color:#f87171}
+  .bar{height:6px; border-radius:4px; background:#0b1220; margin-top:8px; overflow:hidden}
+  .bar > span{display:block; height:100%; border-radius:4px}
+
+  /* viz */
+  .viz{background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:20px 22px 16px; overflow-x:auto}
+  .axis{position:relative; height:18px; margin:0 0 4px 92px}
+  .tick{position:absolute; top:0; transform:translateX(-50%); font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums}
+  .tick.cap{color:#f87171; font-weight:700}
+
+  .lane{display:flex; align-items:stretch; margin-bottom:14px}
+  .lane:last-child{margin-bottom:0}
+  .lane-label{width:84px; flex:0 0 84px; padding-right:8px; font-size:12px; font-weight:700; color:var(--text);
+    display:flex; flex-direction:column; justify-content:center; text-align:right}
+  .lane-label small{font-weight:500; color:var(--muted); font-size:10.5px; margin-top:2px}
+
+  .track{position:relative; height:82px}
+  .node-region{position:absolute; top:0; bottom:0; left:0; background:var(--node-bg);
+    border:2px solid var(--node-border); border-radius:9px}
+
+  .pod{position:absolute; top:6px; height:70px; border-radius:7px; overflow:hidden;
+    transition:left .12s ease-out, width .12s ease-out; border:1.5px solid var(--accent)}
+  .pod.req{background:color-mix(in srgb, var(--accent) 24%, transparent)}
+  .pod.use{background:color-mix(in srgb, var(--accent) 82%, #0b1220)}
+  .pod.use.thr{box-shadow:inset 0 2px 0 0 #f87171}
+
+  .plabel{position:absolute; inset:0; padding:5px 8px; pointer-events:none;
+    display:flex; flex-direction:column; justify-content:center; gap:2px; overflow:hidden;
+    text-shadow:0 1px 2px rgba(0,0,0,.7)}
+  .plabel .nm{font-size:12.5px; font-weight:800; white-space:nowrap}
+  .plabel .l{font-size:10.5px; font-weight:600; white-space:nowrap; font-variant-numeric:tabular-nums; color:#e2e8f0}
+  .plabel .l.muted{color:#cbd5e1; font-weight:500}
+  .plabel .l.t{color:#fca5a5}
+
+  .legend{display:flex; flex-wrap:wrap; gap:16px; margin-top:24px; font-size:12.5px; color:var(--muted); align-items:center}
+  .legend .item{display:flex; align-items:center; gap:7px}
+  .sw{width:24px; height:14px; border-radius:4px; display:inline-block; border:1px solid rgba(255,255,255,.14)}
+
+  /* controls */
+  .controls{display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:26px}
+  .pc{background:var(--panel); border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:12px; padding:14px 16px}
+  .pc .head{display:flex; align-items:center; gap:8px; font-weight:700; margin-bottom:12px}
+  .pc .dot{width:11px; height:11px; border-radius:50%; background:var(--accent)}
+  .ctl{margin-bottom:14px}
+  .ctl .row{display:flex; justify-content:space-between; align-items:baseline; font-size:13px; margin-bottom:4px}
+  .ctl .row b{font-variant-numeric:tabular-nums; font-size:14px}
+  .ctl .hint{font-size:11px; color:var(--muted)}
+  input[type=range]{width:100%; accent-color:var(--accent); cursor:pointer}
+  .pc .alloc{font-size:12px; color:var(--muted); border-top:1px solid var(--line); padding-top:10px; margin-top:2px}
+  .pc .alloc .thr{font-weight:700}
+  .tips{margin-top:22px; font-size:12.5px; color:var(--muted); line-height:1.6}
+  .tips b{color:var(--text)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Kubernetes Node — Requests &amp; Actual Usage <span class="badge">fitted view</span></h1>
+  <p class="sub">
+    Both lanes share one scale and the full node = <b>4 CPU</b>. The <b>top lane</b> packs pods by their
+    <b>request</b> and labels each with its <b>fair share</b> (<code>fs</code> = the slice it would get if every pod
+    competed). The <b>bottom lane</b> packs pods by the CPU they <b>actually get</b> after throttling — so the boxes
+    always fit inside the node. How much a pod <i>wanted</i> and any throttling are shown as text.
+  </p>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="viz">
+    <div class="axis" id="axis"></div>
+    <div class="lane">
+      <div class="lane-label">Requests<small>reservation</small></div>
+      <div class="track" id="trackReq"></div>
+    </div>
+    <div class="lane">
+      <div class="lane-label">Actual CPU<small>after throttle</small></div>
+      <div class="track" id="trackUse"></div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="item"><span class="sw" style="background:color-mix(in srgb,#8b5cf6 24%,transparent);border-color:#8b5cf6"></span> Request (reserved)</div>
+    <div class="item"><span class="sw" style="background:color-mix(in srgb,#8b5cf6 82%,#0b1220);border-color:#8b5cf6"></span> Actual running CPU</div>
+    <div class="item"><span class="sw" style="box-shadow:inset 0 2px 0 0 #f87171;background:color-mix(in srgb,#8b5cf6 82%,#0b1220);border-color:#8b5cf6"></span> Throttled pod (see text)</div>
+    <div class="item"><code>fs</code> = fair share &nbsp;·&nbsp; <code>want</code> = desired usage</div>
+  </div>
+
+  <div class="controls" id="controls"></div>
+
+  <p class="tips">
+    <b>Read it like this:</b> &nbsp;• Empty space at the right of a lane is unused node capacity.&nbsp;
+    • When throttling is active the bottom lane fills the node exactly — it's saturated.&nbsp;
+    • A pod whose <code>want</code> ≤ its running CPU isn't throttled (even if it uses more than it requested).&nbsp;
+    • Raise a pod's request and watch its <code>fs</code> grow and its throttling shrink.
+  </p>
+</div>
+
+<script>
+const CAP = 4, SCALE = 160;
+const MINV = 0.1, MAXV = 3.0, STEP = 0.1;
+const pods = [
+  {id:'A', name:'Pod A', accent:'var(--a)', req:1.0, use:0.8},
+  {id:'B', name:'Pod B', accent:'var(--b)', req:1.5, use:1.2},
+  {id:'C', name:'Pod C', accent:'var(--c)', req:1.0, use:1.5},
+];
+const r1 = n => Math.round(n*10)/10;
+const f2 = n => (Math.round(n*100)/100).toFixed(2);
+
+function allocateCPU(items, cap){
+  const alloc=items.map(()=>0), done=items.map(()=>false);
+  let remaining=cap, g=0;
+  while(g++<50){
+    const active=items.map((_,i)=>i).filter(i=>!done[i]&&items[i].d>1e-9);
+    if(!active.length||remaining<=1e-9) break;
+    const W=active.reduce((s,i)=>s+items[i].w,0), rate=remaining/W;
+    const served=active.filter(i=>rate*items[i].w>=items[i].d-1e-12);
+    if(!served.length){ for(const i of active) alloc[i]=rate*items[i].w; remaining=0; break; }
+    for(const i of served){ alloc[i]=items[i].d; remaining-=items[i].d; done[i]=true; }
+  }
+  return alloc;
+}
+
+function compute(){
+  const items = pods.map(p=>({w:p.req, d:p.use}));
+  const alloc = allocateCPU(items, CAP);
+  const totReq = pods.reduce((s,p)=>s+p.req,0);
+  const totUse = pods.reduce((s,p)=>s+p.use,0);
+  const totAlloc = alloc.reduce((s,a)=>s+a,0);
+  const throttling = totUse > CAP + 1e-9;
+  const per = pods.map((p,i)=>({
+    alloc: alloc[i],
+    fs: CAP * p.req / totReq,                                   // weighted fair share
+    throttle: p.use>1e-9 ? Math.max(0,Math.min(1,1-alloc[i]/p.use)) : 0,
+  }));
+  return {alloc, totReq, totUse, totAlloc, throttling, per};
+}
+
+const el = id => document.getElementById(id);
+
+function renderStats(s){
+  const reqPct=Math.round(s.totReq/CAP*100), usePct=Math.round(s.totUse/CAP*100), free=r1(CAP-s.totReq);
+  el('stats').innerHTML = `
+    <div class="stat"><div class="label">Total Requests</div>
+      <div class="big">${r1(s.totReq).toFixed(1)} <span class="pct">/ 4.0 · ${reqPct}%</span></div>
+      <div class="bar"><span style="width:${Math.min(100,reqPct)}%;background:#64748b"></span></div></div>
+    <div class="stat"><div class="label">Total Usage (desired)</div>
+      <div class="big">${r1(s.totUse).toFixed(1)} <span class="pct">/ 4.0 · ${usePct}%</span></div>
+      <div class="bar"><span style="width:${Math.min(100,usePct)}%;background:${usePct>100?'var(--throttle)':'var(--run)'}"></span></div></div>
+    <div class="stat"><div class="label">Actual Usage (after throttle)</div>
+      <div class="big">${r1(s.totAlloc).toFixed(1)} <span class="pct">/ 4.0 · ${Math.round(s.totAlloc/CAP*100)}%</span></div>
+      <div class="bar"><span style="width:${Math.min(100,s.totAlloc/CAP*100)}%;background:#34d399"></span></div></div>
+    <div class="stat"><div class="label">Throttling</div>
+      <div class="pill ${s.throttling?'bad':'ok'}">${s.throttling?'ACTIVE':'none'}</div>
+      <div class="label" style="margin-top:8px">Allocatable left: <b style="color:var(--text)">${free.toFixed(1)}</b></div></div>`;
+}
+
+function renderAxis(){
+  let h='';
+  for(let v=0; v<=CAP; v++) h += `<span class="tick ${v===CAP?'cap':''}" style="left:${v*SCALE}px">${v}</span>`;
+  el('axis').innerHTML = h;
+}
+
+function render(){
+  const s = compute();
+  renderStats(s);
+  renderAxis();
+  const trackW = CAP*SCALE;
+
+  // ---- requests lane: packed by request, labelled with fair share ----
+  let xr=0, hr=`<div class="node-region" style="width:${trackW}px"></div>`;
+  pods.forEach((p,i)=>{
+    const w=p.req*SCALE, start=xr; xr+=p.req; const fs=s.per[i].fs;
+    hr += `<div class="pod req" style="--accent:${p.accent}; left:${start*SCALE}px; width:${w}px"
+            title="${p.name}: request ${p.req.toFixed(1)} · fair share ${f2(fs)} CPU">
+        <div class="plabel">
+          <span class="nm">${p.name}</span>
+          ${w>50?`<span class="l">req ${p.req.toFixed(1)}</span>`:''}
+          ${w>50?`<span class="l muted">fs ${f2(fs)}</span>`:''}
+        </div>
+      </div>`;
+  });
+  const tReq=el('trackReq'); tReq.style.width=trackW+'px'; tReq.innerHTML=hr;
+
+  // ---- actual-CPU lane: packed by allocation (always fits the node) ----
+  let xu=0, hu=`<div class="node-region" style="width:${trackW}px"></div>`;
+  pods.forEach((p,i)=>{
+    const d=s.per[i], start=xu; xu+=d.alloc;
+    const w=d.alloc*SCALE, thr=d.throttle, pct=Math.round(thr*100);
+    hu += `<div class="pod use ${thr>0.001?'thr':''}" style="--accent:${p.accent}; left:${start*SCALE}px; width:${w}px"
+            title="${p.name}: wanted ${p.use.toFixed(1)} · running ${f2(d.alloc)} · throttled ${pct}%">
+        <div class="plabel">
+          <span class="nm">${p.name}</span>
+          ${w>58?`<span class="l muted">want ${p.use.toFixed(1)}</span>`:''}
+          ${w>58?`<span class="l ${thr>0.001?'t':''}">run ${f2(d.alloc)}${thr>0.001?` · ${pct}%▼`:''}</span>`:''}
+        </div>
+      </div>`;
+  });
+  const tUse=el('trackUse'); tUse.style.width=trackW+'px'; tUse.innerHTML=hu;
+
+  // per-pod control readouts + request hints
+  pods.forEach((p,i)=>{
+    const d=s.per[i], thr=Math.round(d.throttle*100);
+    document.querySelector(`.pc[data-id="${p.id}"] .alloc`).innerHTML =
+      `fair share <b style="color:var(--text)">${f2(d.fs)}</b> · running <b style="color:var(--text)">${f2(d.alloc)}</b> · `
+      + `throttled <span class="thr" style="color:${thr>0?'var(--throttle)':'#34d399'}">${thr}%</span>`;
+    const others=pods.filter(o=>o!==p).reduce((a,o)=>a+o.req,0);
+    const maxReq=Math.min(MAXV, r1(CAP-others));
+    document.querySelector(`.pc[data-id="${p.id}"] .req-hint`).textContent =
+      p.req>=maxReq-1e-9 ? 'node fully requested' : `max ${maxReq.toFixed(1)}`;
+  });
+}
+
+function buildControls(){
+  el('controls').innerHTML = pods.map(p=>`
+    <div class="pc" data-id="${p.id}" style="--accent:${p.accent}">
+      <div class="head"><span class="dot"></span>${p.name}</div>
+      <div class="ctl">
+        <div class="row"><span>Request</span><b><span class="rv">${p.req.toFixed(1)}</span> CPU</b></div>
+        <input type="range" class="req" min="${MINV}" max="${MAXV}" step="${STEP}" value="${p.req}">
+        <div class="hint req-hint"></div>
+      </div>
+      <div class="ctl">
+        <div class="row"><span>Usage</span><b><span class="uv">${p.use.toFixed(1)}</span> CPU</b></div>
+        <input type="range" class="use" min="${MINV}" max="${MAXV}" step="${STEP}" value="${p.use}">
+      </div>
+      <div class="alloc"></div>
+    </div>`).join('');
+
+  pods.forEach(p=>{
+    const card=document.querySelector(`.pc[data-id="${p.id}"]`);
+    const reqEl=card.querySelector('.req'), useEl=card.querySelector('.use');
+    reqEl.addEventListener('input', ()=>{
+      const others=pods.filter(o=>o!==p).reduce((a,o)=>a+o.req,0);
+      const maxReq=Math.min(MAXV, r1(CAP-others));
+      let v=parseFloat(reqEl.value);
+      if(v>maxReq){ v=maxReq; reqEl.value=v; }
+      p.req=r1(v); card.querySelector('.rv').textContent=p.req.toFixed(1); render();
+    });
+    useEl.addEventListener('input', ()=>{
+      p.use=r1(parseFloat(useEl.value)); card.querySelector('.uv').textContent=p.use.toFixed(1); render();
+    });
+  });
+}
+
+buildControls();
+render();
+</script>
+</body>
+</html>
