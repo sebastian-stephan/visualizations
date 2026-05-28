@@ -51,11 +51,11 @@
   .node-region{position:absolute; top:0; bottom:0; left:0; background:var(--node-bg);
     border:2px solid var(--node-border); border-radius:9px}
 
-  .pod{position:absolute; top:6px; height:70px; border-radius:7px; overflow:hidden;
+  .pod{position:absolute; top:6px; height:70px; border-radius:3px; overflow:hidden;
     transition:left .12s ease-out, width .12s ease-out; border:1.5px solid var(--accent)}
   .pod.req{background:color-mix(in srgb, var(--accent) 24%, transparent)}
   .pod.use{background:color-mix(in srgb, var(--accent) 82%, #0b1220)}
-  .pod.use.thr{box-shadow:inset 0 2px 0 0 #f87171}
+  .pod.use.thr{border:2px solid #f87171; box-shadow:0 0 10px rgba(248,113,113,.55), inset 0 0 18px rgba(248,113,113,.15)}
 
   .plabel{position:absolute; inset:0; padding:5px 8px; pointer-events:none;
     display:flex; flex-direction:column; justify-content:center; gap:2px; overflow:hidden;
@@ -87,7 +87,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>Kubernetes Node — Requests &amp; Actual Usage <span class="badge">fitted view</span></h1>
+  <h1>Kubernetes Node — Requests &amp; Actual Usage</h1>
   <p class="sub">
     Both lanes share one scale and the full node = <b>4 CPU</b>. The <b>top lane</b> packs pods by their
     <b>request</b> and labels each with its <b>fair share</b> (<code>fs</code> = the slice it would get if every pod
@@ -128,11 +128,11 @@
 
 <script>
 const CAP = 4, SCALE = 160;
-const MINV = 0.1, MAXV = 3.0, STEP = 0.1;
+const MINV = 0.1, MAXV = 3.0, MAXU = 10.0, STEP = 0.1;
 const pods = [
-  {id:'A', name:'Pod A', accent:'var(--a)', req:1.0, use:0.8},
-  {id:'B', name:'Pod B', accent:'var(--b)', req:1.5, use:1.2},
-  {id:'C', name:'Pod C', accent:'var(--c)', req:1.0, use:1.5},
+  {id:'A', name:'Pod A', accent:'var(--a)', req:1.0, use:0.5},
+  {id:'B', name:'Pod B', accent:'var(--b)', req:1.0, use:0.5},
+  {id:'C', name:'Pod C', accent:'var(--c)', req:1.0, use:0.5},
 ];
 const r1 = n => Math.round(n*10)/10;
 const f2 = n => (Math.round(n*100)/100).toFixed(2);
@@ -169,20 +169,20 @@ function compute(){
 const el = id => document.getElementById(id);
 
 function renderStats(s){
-  const reqPct=Math.round(s.totReq/CAP*100), usePct=Math.round(s.totUse/CAP*100), free=r1(CAP-s.totReq);
+  const reqPct=Math.round(s.totReq/CAP*100), usePct=Math.round(s.totUse/CAP*100), free=r1(Math.max(0,CAP-s.totAlloc));
   el('stats').innerHTML = `
     <div class="stat"><div class="label">Total Requests</div>
-      <div class="big">${r1(s.totReq).toFixed(1)} <span class="pct">/ 4.0 · ${reqPct}%</span></div>
+      <div class="big">${reqPct}%<span class="pct"> (${r1(s.totReq).toFixed(1)} / 4.0 vCPU)</span></div>
       <div class="bar"><span style="width:${Math.min(100,reqPct)}%;background:#64748b"></span></div></div>
     <div class="stat"><div class="label">Total Usage (desired)</div>
-      <div class="big">${r1(s.totUse).toFixed(1)} <span class="pct">/ 4.0 · ${usePct}%</span></div>
+      <div class="big">${usePct}%<span class="pct"> (${r1(s.totUse).toFixed(1)} / 4.0 vCPU)</span></div>
       <div class="bar"><span style="width:${Math.min(100,usePct)}%;background:${usePct>100?'var(--throttle)':'var(--run)'}"></span></div></div>
     <div class="stat"><div class="label">Actual Usage (after throttle)</div>
-      <div class="big">${r1(s.totAlloc).toFixed(1)} <span class="pct">/ 4.0 · ${Math.round(s.totAlloc/CAP*100)}%</span></div>
+      <div class="big">${Math.round(s.totAlloc/CAP*100)}%<span class="pct"> (${r1(s.totAlloc).toFixed(1)} / 4.0 vCPU)</span></div>
       <div class="bar"><span style="width:${Math.min(100,s.totAlloc/CAP*100)}%;background:#34d399"></span></div></div>
     <div class="stat"><div class="label">Throttling</div>
       <div class="pill ${s.throttling?'bad':'ok'}">${s.throttling?'ACTIVE':'none'}</div>
-      <div class="label" style="margin-top:8px">Allocatable left: <b style="color:var(--text)">${free.toFixed(1)}</b></div></div>`;
+      <div class="label" style="margin-top:8px">Spare CPU: <b style="color:var(--text)">${free.toFixed(1)}</b></div></div>`;
 }
 
 function renderAxis(){
@@ -252,7 +252,7 @@ function buildControls(){
       </div>
       <div class="ctl">
         <div class="row"><span>Usage</span><b><span class="uv">${p.use.toFixed(1)}</span> CPU</b></div>
-        <input type="range" class="use" min="${MINV}" max="${MAXV}" step="${STEP}" value="${p.use}">
+        <input type="range" class="use" min="${MINV}" max="${MAXU}" step="${STEP}" value="${p.use}">
       </div>
       <div class="alloc"></div>
     </div>`).join('');
